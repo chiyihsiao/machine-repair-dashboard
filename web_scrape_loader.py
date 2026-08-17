@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from datetime import datetime
 from typing import Any
 
@@ -29,10 +30,16 @@ def load_requests_from_web(url: str = SOURCE_URL, headless: bool = True, timeout
     records: list[dict[str, Any]] = []
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=headless,
-                args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"],
-            )
+            launch_options = {
+                "headless": headless,
+                "args": ["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"],
+            }
+            # Streamlit Cloud 透過 packages.txt 安裝系統 Chromium；本機 Windows
+            # 沒有該執行檔時，則使用 playwright install 的瀏覽器。
+            system_chromium = shutil.which("chromium") or shutil.which("chromium-browser")
+            if system_chromium:
+                launch_options["executable_path"] = system_chromium
+            browser = p.chromium.launch(**launch_options)
             page = browser.new_page(viewport={"width": 1600, "height": 1000})
             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
             page.wait_for_timeout(8000)

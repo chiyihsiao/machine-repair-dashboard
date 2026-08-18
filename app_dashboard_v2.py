@@ -140,43 +140,44 @@ def fmt_number(value) -> str:
 
 
 def render_case_card(row: pd.Series) -> None:
-    """以單欄垂直卡片呈現案件，手機上可直接由上往下閱讀。"""
+    """原始多彩手機直視案件卡片；附件按鈕放在同一張卡片底部。"""
     status = str(row.get("精確進度狀態", "未判定"))
     completion_status = str(row.get("完工狀態", "尚未完工"))
     risk = str(row.get("風險", "正常"))
-    case_id = str(row.get("報修單號", "未編號"))
-    device = str(row.get("設備名稱", "未填設備"))
+    case_id = html.escape(str(row.get("報修單號", "未編號")))
+    date_text = html.escape(str(row.get("申請日期", "未填")))
+    device = html.escape(str(row.get("設備名稱", "未填設備")))
+    trouble = html.escape(str(row.get("故障狀況", "未填"))).replace("\n", "<br>")
+    current = html.escape(str(row.get("目前狀態", "未填"))).replace("\n", "<br>")
+    memo = html.escape(str(row.get("維修進度備註", "無備註"))).replace("\n", "<br>")
+    worker = html.escape(str(row.get("承辦人", "未指派")))
+    applicant = html.escape(str(row.get("報修人", "未提供")))
+    completion_date = html.escape(str(row.get("實際完工日期", "尚未完工")))
+    expected_date = html.escape(str(row.get("預計完成日", "未填")))
+    duration = html.escape(fmt_number(row.get("維修天數")))
+    delay = html.escape(fmt_number(row.get("逾期天數")))
+    status_color = STATUS_COLORS.get(status, "#64748B")
+    risk_color = "#DC2626" if risk == "已逾期" else ("#D97706" if risk == "待處理" else "#64748B")
 
-    with st.container(border=True):
-        st.subheader(f"{case_id}｜{device}")
-        st.caption(
-            f"流程狀態：{status}　｜　完工狀態：{completion_status}　｜　"
-            f"風險：{risk}　｜　資料來源：{row.get('資料來源', '對方網站同步')}"
-        )
-        st.write(f"**申請日期：** {row.get('申請日期', '未填')}")
-        st.write(f"**實際完工日：** {row.get('實際完工日期', '尚未完工')}")
-        st.write(f"**預計完成日：** {row.get('預計完成日', '未填')}")
-        st.write(f"**維修天數：** {fmt_number(row.get('維修天數'))} 天　｜　**逾期天數：** {fmt_number(row.get('逾期天數'))} 天")
-        st.write(f"**報修人：** {row.get('報修人', '未提供')}　｜　**承辦人：** {row.get('承辦人', '未指派')}")
-        st.write(f"**故障狀況：** {row.get('故障狀況', '未填')}")
-        st.write(f"**目前狀態：** {row.get('目前狀態', '未填')}")
-        st.markdown("**維修備註**")
-        st.text(str(row.get("維修進度備註", "無備註")))
+    attachment_html = ""
+    links = row.get("圖片連結清單", [])
+    valid_links = []
+    if isinstance(links, list):
+        for item in links:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                label, url = str(item[0]).strip(), str(item[1]).strip()
+                if safe_url(url) and (label, url) not in valid_links:
+                    valid_links.append((label or "照片連結", url))
+    if valid_links:
+        attachment_html = "<div style='margin-top:12px;padding-top:10px;border-top:1px dashed #CBD5E1;background:#F8F9FA;'><div style='font-size:13px;color:#475569;font-weight:700;margin-bottom:6px;'>附件</div>"
+        for label, url in valid_links:
+            safe_label = html.escape(label)
+            safe_url = html.escape(url, quote=True)
+            attachment_html += f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer' style='display:inline-block;margin:3px 8px 3px 0;padding:8px 11px;border:1px solid #90CAF9;border-radius:6px;background:#E3F2FD;color:#0D47A1;text-decoration:none;font-size:13px;font-weight:700;'>點擊觀看 [{safe_label}]</a>"
+        attachment_html += "</div>"
 
-        links = row.get("圖片連結清單", [])
-        valid_links = []
-        if isinstance(links, list):
-            for item in links:
-                if isinstance(item, (list, tuple)) and len(item) == 2:
-                    label, url = str(item[0]), str(item[1])
-                    if safe_url(url) and (label, url) not in valid_links:
-                        valid_links.append((label, url))
-        if valid_links:
-            st.markdown("**附件**")
-            link_cols = st.columns(min(2, len(valid_links)))
-            for index, (label, url) in enumerate(valid_links):
-                with link_cols[index % len(link_cols)]:
-                    st.link_button(f"查看{label}", url, use_container_width=True)
+    card_html = f"<div style='border-left:8px solid {status_color};background:#F8F9FA;padding:15px;border-radius:7px;margin-bottom:15px;box-shadow:1px 1px 5px rgba(0,0,0,.06);'><div style='display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;'><span style='font-size:13px;color:#475569;'>📅 申請日：{date_text}<br><span style='font-size:12px;color:#64748B;'>案件：{case_id}</span></span><span style='text-align:right;'><span style='display:inline-block;background:{status_color};color:#fff;padding:4px 9px;border-radius:12px;font-size:12px;font-weight:700;'>{html.escape(status)}</span><br><span style='display:inline-block;margin-top:4px;background:{risk_color};color:#fff;padding:3px 8px;border-radius:10px;font-size:11px;'>{html.escape(completion_status)}｜{html.escape(risk)}</span></span></div><p style='margin:8px 0;font-size:16px;color:#111;'><b>🛠️ 設備名稱：</b><br><span style='color:#0D47A1;font-weight:700;'>{device}</span></p><p style='margin:8px 0;font-size:14px;color:#333;'><b>🚨 故障狀況：</b><br>{trouble}</p><p style='margin:5px 0;font-size:14px;color:#2E7D32;'><b>👤 報修人：</b>{applicant}　<b>👨‍🔧 承辦：</b>{worker}</p><p style='margin:5px 0;font-size:14px;color:#444;'><b>💬 目前狀態：</b><br>{current}</p><p style='margin:5px 0;font-size:13px;color:#475569;background:#EEF6FF;padding:7px;border-radius:4px;border:1px solid #D7E8FA;'><b>📊 日期分析：</b>實際完工日：{completion_date}<br>預計完成日：{expected_date}｜維修天數：{duration} 天｜逾期天數：{delay} 天</p><p style='margin:5px 0;font-size:13px;color:#666;background:#FFF;padding:7px;border-radius:4px;border:1px dashed #DDD;'><b>📝 維修備註：</b><br>{memo}</p>{attachment_html}</div>"
+    st.markdown(card_html, unsafe_allow_html=True)
 
 
 if check_password():

@@ -1,16 +1,38 @@
+from __future__ import annotations
+
 import html
 import json
 import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
+
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 
-def is_safe_url(value):
-    """只允許可供使用者點擊的 HTTP(S) 圖片／附件網址。"""
+st.set_page_config(
+    page_title="田中工廠設備報修｜管理儀表板",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+
+STATUS_COLORS = {
+    "已完成": "#16A34A",
+    "維修中": "#2563EB",
+    "待主管審核": "#D97706",
+    "設備課待處理": "#DC2626",
+    "主管已駁回": "#7C3AED",
+    "尚未完工": "#DC2626",
+}
+PENDING_STATUSES = {"維修中", "待主管審核", "設備課待處理", "主管已駁回"}
+
+
+def safe_url(value: str) -> bool:
     try:
         parsed = urlparse(str(value).strip())
         return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
@@ -18,217 +40,262 @@ def is_safe_url(value):
         return False
 
 
-# 1. 網頁頂部全寬畫面配置
-st.set_page_config(page_title="田中工廠設備報修管理戰情監控中心", layout="wide")
-
-# 華麗的前端大標題
-st.markdown("<h1 style='text-align: center; color: #1E88E5;'>🏭 田中工廠設備報修管理 ➔ 數據可視化戰情監控中心</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #757575;'>人員維度與進度狀態 • 智慧圓餅圖長條圖比例呈現版 (雲端同步終極安全永久版)</p>", unsafe_allow_html=True)
-st.markdown("---")
-
-# --- 🔐 可選密碼保護機制 ---
-# 沒有 .streamlit/secrets.toml 時，直接進入分析頁面；
-# 若設定 app_password，則恢復原本的登入保護。
-def configured_app_password():
+def secret_value(key: str, fallback: str = "") -> str:
     try:
-        return str(st.secrets["app_password"]).strip()
+        return str(st.secrets[key]).strip()
     except Exception:
-        return ""
+        return fallback
 
 
-def check_password():
-    app_password = configured_app_password()
-    if not app_password:
+def check_password() -> bool:
+    password = secret_value("app_password")
+    if not password:
         return True
-
-    if "password_correct" not in st.session_state:
-        st.session_state["password_correct"] = False
-    if st.session_state["password_correct"]:
+    if st.session_state.get("password_correct", False):
         return True
-
-    st.markdown("<h3 style='text-align: center; color: #1E88E5; font-weight: bold;'>🏭 田中工廠報修系統 安全登入</h3>", unsafe_allow_html=True)
-    user_password = st.text_input("🔑 請輸入工廠專屬連線密碼", type="password")
-    if st.button("確認登入", type="primary", use_container_width=True):
-        if user_password == app_password:
+    st.markdown("## 🔐 報修管理儀表板登入")
+    entered = st.text_input("請輸入系統密碼", type="password")
+    if st.button("登入", type="primary"):
+        if entered == password:
             st.session_state["password_correct"] = True
             st.rerun()
-        else:
-            st.error("❌ 密碼錯誤，請重新輸入！")
+        st.error("密碼錯誤。")
     return False
 
-# 🌟 如果密碼正確，才執行後續所有內容
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_dashboard_data() -> pd.DataFrame:
+    source_url = secret_value(
+        "source_web_app_url",
+        "https://script.google.com/a/sanban.com.tw/macros/s/AKfycbzRm55JbcUpfuIzqSYdAlJ8HaBHdBQYdjehubL3DWFYPCZNfJz5_Xfa1h2TaOdac8JW/exec",
+    )
+    worker = Path(__file__).with_name("web_scrape_worker.py")
+    result = subprocess.run(
+        [sys.executable, str(worker), source_url],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=90,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "自動擷取程序未正常完成")
+    live_df = pd.DataFrame(json.loads(result.stdout))
+
+    local_json = Path(__file__).with_name("local_records.json")
+    local_csv = Path(__file__).with_name("local_records.csv")
+    local_df = pd.DataFrame()
+    if local_json.exists():
+        local_df = pd.DataFrame(json.loads(local_json.read_text(encoding="utf-8")))
+    elif local_csv.exists():
+        local_df = pd.read_csv(local_csv, encoding="utf-8-sig")
+
+    if not local_df.empty:
+        from merge_records import merge_live_and_local
+        return merge_live_and_local(live_df, local_df)
+    return live_df
+
+
+def prepare_data(df: pd.DataFrame) -> pd.DataFrame:
+    result = df.copy()
+    defaults = {
+        "精確進度狀態": "設備課待處理",
+        "承辦人": "未指派/待審核",
+        "報修人": "未提供",
+        "申請日期": "",
+        "申請月份": "未分類",
+        "實際完工日期": "",
+        "實際完工月份": "未完工",
+        "完工狀態": "尚未完工",
+        "希望完成日": "",
+        "預計完成日": "",
+        "維修天數": None,
+        "逾期天數": None,
+        "資料來源": "對方網站同步",
+        "維修進度備註": "",
+        "圖片連結清單": [[] for _ in range(len(result))],
+    }
+    for column, default in defaults.items():
+        if column not in result.columns:
+            result[column] = default
+    result["申請日期_dt"] = pd.to_datetime(result["申請日期"], errors="coerce")
+    result["實際完工日期_dt"] = pd.to_datetime(result["實際完工日期"], errors="coerce")
+    result["完工狀態"] = result["實際完工日期_dt"].notna().map({True: "已完工", False: "尚未完工"})
+    result["逾期天數_num"] = pd.to_numeric(result["逾期天數"], errors="coerce")
+    result["維修天數_num"] = pd.to_numeric(result["維修天數"], errors="coerce")
+    result["風險"] = "正常"
+    result.loc[result["精確進度狀態"].isin(PENDING_STATUSES), "風險"] = "待處理"
+    result.loc[result["逾期天數_num"].gt(0).fillna(False), "風險"] = "已逾期"
+    result.loc[result["精確進度狀態"].eq("主管已駁回"), "風險"] = "已駁回"
+    result["顯示日期"] = result["申請日期_dt"].dt.strftime("%Y/%m/%d").fillna("未填日期")
+    return result
+
+
+def fmt_number(value) -> str:
+    if pd.isna(value):
+        return "—"
+    try:
+        return f"{float(value):.1f}" if float(value) % 1 else f"{int(value)}"
+    except Exception:
+        return str(value)
+
+
+def render_case_card(row: pd.Series) -> None:
+    status = str(row.get("精確進度狀態", "未判定"))
+    risk = str(row.get("風險", "正常"))
+    case_id = str(row.get("報修單號", "未編號"))
+    device = str(row.get("設備名稱", "未填設備"))
+    title = f"{case_id}｜{device}｜{status}"
+    with st.expander(title, expanded=False):
+        top1, top2, top3, top4 = st.columns(4)
+        top1.metric("申請日期", str(row.get("申請日期", "未填")))
+        top2.metric("實際完工日", str(row.get("實際完工日期", "尚未完工")))
+        top3.metric("維修天數", f"{fmt_number(row.get('維修天數'))} 天")
+        top4.metric("逾期天數", f"{fmt_number(row.get('逾期天數'))} 天")
+        st.caption(f"流程狀態：{status}　｜　完工狀態：{row.get('完工狀態', '尚未完工')}　｜　風險：{risk}　｜　資料來源：{row.get('資料來源', '對方網站同步')}")
+        left, right = st.columns([1, 1])
+        with left:
+            st.markdown(f"**設備名稱**：{html.escape(device)}")
+            st.markdown(f"**報修人**：{html.escape(str(row.get('報修人', '未提供')))}")
+            st.markdown(f"**承辦人**：{html.escape(str(row.get('承辦人', '未指派')))}")
+            st.markdown(f"**預計完成日**：{html.escape(str(row.get('預計完成日', '未填')))}")
+        with right:
+            st.markdown(f"**故障狀況**：{html.escape(str(row.get('故障狀況', '未填')))}")
+            st.markdown(f"**目前狀態**：{html.escape(str(row.get('目前狀態', '未填')))}")
+        with st.expander("查看維修備註", expanded=False):
+            st.text(str(row.get("維修進度備註", "無備註")))
+        links = row.get("圖片連結清單", [])
+        valid_links = []
+        if isinstance(links, list):
+            for item in links:
+                if isinstance(item, (list, tuple)) and len(item) == 2:
+                    label, url = str(item[0]), str(item[1])
+                    if safe_url(url) and (label, url) not in valid_links:
+                        valid_links.append((label, url))
+        if valid_links:
+            st.markdown("**附件**")
+            link_cols = st.columns(min(3, len(valid_links)))
+            for index, (label, url) in enumerate(valid_links):
+                with link_cols[index % len(link_cols)]:
+                    st.link_button(f"查看{label}", url, use_container_width=True)
+
+
 if check_password():
+    st.title("田中工廠設備報修管理")
+    st.caption("86筆案件｜55筆對方網站同步＋31筆本地永久歷史｜以實際完工日分析")
 
-    # ================== 2. 核心功能：自動讀取對方 Apps Script 網頁 ==================
-    from merge_records import merge_live_and_local
-
-    @st.cache_data(ttl=60, show_spinner=False)
-    def load_and_stitch_perfect_rows_cloud_final():
-        try:
-            source_url = st.secrets.get("source_web_app_url", "").strip()
-        except Exception:
-            source_url = ""
-        worker = Path(__file__).with_name("web_scrape_worker.py")
-        command = [sys.executable, str(worker)]
-        if source_url:
-            command.append(source_url)
-        # Windows 首次啟動 Chromium 或網路較慢時可能超過 35 秒；保留足夠時間完成一次同步。
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=90,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "自動瀏覽器程序未正常完成")
-        records = json.loads(result.stdout)
-        return pd.DataFrame(records)
+    with st.sidebar:
+        st.header("控制面板")
+        if st.button("🔄 立即同步對方資料", use_container_width=True):
+            load_dashboard_data.clear()
+            st.rerun()
+        st.caption("自動同步快取：5分鐘。首次同步需啟動瀏覽器，約10～60秒。")
 
     try:
-        with st.spinner("正在讀取對方報修資料，請稍候（最長約 90 秒）..."):
-            df = load_and_stitch_perfect_rows_cloud_final()
-    except Exception as e:
-        st.error(f"❌ 對方網頁資料讀取失敗：{e}")
-        st.info("請確認已執行：pip install playwright，並執行 playwright install chromium。")
+        with st.spinner("正在同步資料並整理儀表板，請稍候..."):
+            df = prepare_data(load_dashboard_data())
+    except Exception as exc:
+        st.error(f"資料同步失敗：{exc}")
         st.stop()
 
-    # 可選的本地歷史資料：將你的 86 筆資料存成同資料夾的 local_records.json 或 local_records.csv。
-    # 對方網站資料優先覆蓋相同報修單號；未出現在網站的31筆永久保留為本地歷史資料。
-    local_path_json = Path(__file__).with_name("local_records.json")
-    local_path_csv = Path(__file__).with_name("local_records.csv")
-    local_df = pd.DataFrame()
-    try:
-        if local_path_json.exists():
-            local_df = pd.DataFrame(json.loads(local_path_json.read_text(encoding="utf-8")))
-        elif local_path_csv.exists():
-            local_df = pd.read_csv(local_path_csv, encoding="utf-8-sig")
-    except Exception as e:
-        st.warning(f"⚠️ 本地歷史資料載入失敗，暫時只顯示對方網站資料：{e}")
-    if not local_df.empty:
-        df = merge_live_and_local(df, local_df)
-        st.caption(f"目前顯示 {len(df)} 筆：55筆由對方網站同步更新，其餘本地歷史資料永久保留。")
+    # ---- 篩選區 ----
+    with st.sidebar:
+        st.header("篩選條件")
+        date_basis = st.radio("月份依據", ["實際完工月份", "申請月份"], index=0)
+        month_values = sorted(df[date_basis].dropna().astype(str).unique().tolist())
+        selected_months = st.multiselect("月份", month_values, default=month_values)
+        completion_states = ["尚未完工", "已完工"]
+        selected_completion_states = st.multiselect("完工狀態", completion_states, default=completion_states)
+        statuses = sorted(df["精確進度狀態"].dropna().astype(str).unique().tolist())
+        selected_statuses = st.multiselect("流程狀態", statuses, default=statuses)
+        assignees = sorted(df["承辦人"].dropna().astype(str).unique().tolist())
+        selected_assignees = st.multiselect("承辦人", assignees, default=assignees)
+        risk_values = ["正常", "待處理", "已逾期", "已駁回"]
+        selected_risks = st.multiselect("風險分類", risk_values, default=risk_values)
+        keyword = st.text_input("搜尋案件", placeholder="單號、設備、故障狀況、報修人")
 
-    # ================== 3. Streamlit 前端網頁大螢幕呈現 ==================
-    if not df.empty:
-        total_cases = len(df)
-        completed_cases = int(df["實際完工日期"].fillna("").astype(str).str.strip().ne("").sum())
-        accepted_cases = int((df["精確進度狀態"] == "已完成").sum())
-        pending_cases = total_cases - accepted_cases
+    filtered = df[
+        df[date_basis].astype(str).isin(selected_months)
+        & df["完工狀態"].astype(str).isin(selected_completion_states)
+        & df["精確進度狀態"].astype(str).isin(selected_statuses)
+        & df["承辦人"].astype(str).isin(selected_assignees)
+        & df["風險"].astype(str).isin(selected_risks)
+    ].copy()
+    if keyword.strip():
+        search_columns = ["報修單號", "設備名稱", "故障狀況", "報修人", "承辦人", "維修進度備註"]
+        mask = filtered[search_columns].fillna("").astype(str).agg(" ".join, axis=1).str.contains(keyword.strip(), case=False, na=False)
+        filtered = filtered[mask]
 
-        k1, k2, k3, k4 = st.columns(4)
-        k1.markdown(f"<div style='background-color:#E3F2FD; padding:15px; border-radius:10px; text-align:center;'><h4 style='color:#0D47A1;margin:0;'>📋 總報修件數</h4><h2 style='color:#0D47A1;margin:5px 0;'>{total_cases} 件</h2></div>", unsafe_allow_html=True)
-        k2.markdown(f"<div style='background-color:#FFEBEE; padding:15px; border-radius:10px; text-align:center;'><h4 style='color:#B71C1C;margin:0;'>⏳ 尚未核准完成</h4><h2 style='color:#B71C1C;margin:5px 0;'>{pending_cases} 件</h2></div>", unsafe_allow_html=True)
-        k3.markdown(f"<div style='background-color:#E8F5E9; padding:15px; border-radius:10px; text-align:center;'><h4 style='color:#1B5E20;margin:0;'>✅ 已有實際完工日</h4><h2 style='color:#1B5E20;margin:5px 0;'>{completed_cases} 件</h2></div>", unsafe_allow_html=True)
-        
-        rate = (completed_cases / total_cases * 100) if total_cases > 0 else 0.0
-        k4.markdown(f"<div style='background-color:#FFF3E0; padding:15px; border-radius:10px; text-align:center;'><h4 style='color:#E65100;margin:0;'>📈 實際完工回報率</h4><h2 style='color:#E65100;margin:5px 0;'>{rate:.1f} %</h2><small style='color:#9A3412;'>核准完成 {accepted_cases} 件</small></div>", unsafe_allow_html=True)
+    # ---- KPI ----
+    total = len(filtered)
+    completed = int((filtered["完工狀態"] == "已完工").sum())
+    pending = int((filtered["完工狀態"] == "尚未完工").sum())
+    overdue = int(filtered["逾期天數_num"].gt(0).fillna(False).sum())
+    avg_days = filtered["維修天數_num"].dropna().mean()
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("目前案件", f"{total} 件")
+    k2.metric("尚未完工", f"{pending} 件")
+    k3.metric("已有實際完工日", f"{completed} 件")
+    k4.metric("逾期案件", f"{overdue} 件", delta="需優先關注" if overdue else "目前無逾期", delta_color="inverse")
+    k5.metric("平均維修天數", f"{fmt_number(avg_days)} 天")
+    st.caption(f"目前篩選：{total} 件；月份分析依據為「{date_basis}」。")
 
-        st.markdown("---")
-        st.markdown("### 🔍 智慧人員與時間進度篩選系統")
-        f1, f2, f3, f4 = st.columns(4)
-        with f1:
-            date_basis = st.selectbox("📅 月份分析依據：", ["實際完工月份", "申請月份"])
-            month_column = date_basis
-            available_months = ["全部月份"] + sorted(df[month_column].dropna().astype(str).unique().tolist())
-            selected_month = st.selectbox(f"按【{date_basis}】查詢：", available_months)
-        with f2:
-            selected_user = st.selectbox("👤 按【報修人員姓名】快速篩選：", ["全部報修人"] + sorted(df["報修人"].dropna().astype(str).unique().tolist()))
-        with f3:
-            selected_assignee = st.selectbox("👨‍🔧 按【承辦維修人員】快速篩選：", ["全部承辦人"] + sorted(df["承辦人"].dropna().astype(str).unique().tolist()))
-        with f4:
-            known_statuses = ["已完成", "維修中", "待主管審核", "設備課待處理", "主管已駁回"]
-            extra_statuses = [x for x in df["精確進度狀態"].dropna().astype(str).unique().tolist() if x not in known_statuses]
-            selected_status = st.selectbox("🚦 按【目前進度狀態】精確篩選：", ["全部狀態"] + known_statuses + sorted(extra_statuses))
-
-        filtered_df = df.copy()
-        if selected_month != "全部月份": filtered_df = filtered_df[filtered_df[month_column].astype(str) == selected_month]
-        if selected_user != "全部報修人": filtered_df = filtered_df[filtered_df["報修人"] == selected_user]
-        if selected_assignee != "全部承辦人": filtered_df = filtered_df[filtered_df["承辦人"] == selected_assignee]
-        if selected_status != "全部狀態": filtered_df = filtered_df[filtered_df["精確進度狀態"] == selected_status]
-
-        st.markdown(f"💡 目前依據選單過濾出：<b style='color:#1E88E5; font-size:18px;'>{len(filtered_df)}</b> 筆符合條件的工廠報修紀錄。", unsafe_allow_html=True)
-        st.markdown("---")
-
-        col1, col2 = st.columns(2)
-        color_map = {"已完成": "#2ECC71", "維修中": "#3498DB", "待主管審核": "#F39C12", "設備課待處理": "#E74C3C", "主管已駁回": "#8E44AD"}
-        
-        with col1:
-            st.write("**🚨 篩選範圍內：全流程維修進度狀態比例 (圓餅圖)**")
-            if not filtered_df.empty:
-                pie_data = filtered_df["精確進度狀態"].value_counts().reset_index()
-                pie_data.columns = ["狀態", "件數"]
-                st.plotly_chart(px.pie(pie_data, values="件數", names="狀態", hole=0.4, height=320, color="狀態", color_discrete_map=color_map), use_container_width=True)
-            else:
-                st.info("無數據可顯示圓餅圖")
-
-        with col2:
-            st.write("**👨‍🔧 各工程師承辦案件狀態比例 (強制垂直堆疊長條圖)**")
-            if not filtered_df.empty:
-                bar_data = filtered_df.groupby(["承辦人", "精確進度狀態"]).size().reset_index(name="件數")
-                fig_bar = px.bar(bar_data, x="承辦人", y="件數", color="精確進度狀態", barmode="stack", text_auto=True, height=320, template="plotly_white", color_discrete_map=color_map)
-                fig_bar.update_layout(xaxis_title="工程師姓名", yaxis_title="總案件數量 (件)", legend_title="案件狀態", bargap=0.45, xaxis={'type': 'category', 'categoryorder': 'total descending'})
-                st.plotly_chart(fig_bar, use_container_width=True)
-            else:
-                st.info("無數據可顯示長條圖")
-
-        st.markdown("---")
-        st.markdown("### 📱 歷史報修詳細清單 (手機響應式垂直卡片 + 雲端照片直顯優化版)")
-        
-        if not filtered_df.empty:
-            for idx, row_data in filtered_df.iterrows():
-                status_now = row_data["精確進度狀態"]
-                border_color = color_map.get(status_now, "#9E9E9E")
-                
-                def force_get_text(val, fallback_msg=""):
-                    if pd.isna(val) or str(val).strip().lower() == "nan" or str(val).strip() == "":
-                        return html.escape(fallback_msg)
-                    # 試算表內容一律 escape，避免文字被誤當成 HTML。
-                    return html.escape(str(val)).replace("\n", "<br>")
-
-                date_box = force_get_text(row_data.get("報修日期／單號"), "（未填日期）")
-                application_box = force_get_text(row_data.get("申請日期"), "未填")
-                completion_box = force_get_text(row_data.get("實際完工日期"), "尚未完工")
-                completion_month_box = force_get_text(row_data.get("實際完工月份"), "未完工")
-                duration_box = force_get_text(row_data.get("維修天數"), "未計算")
-                delay_box = force_get_text(row_data.get("逾期天數"), "未計算")
-                source_box = force_get_text(row_data.get("資料來源"), "對方網站同步")
-                device_box = force_get_text(row_data.get("設備名稱"), "（未填設備）")
-                trouble_box = force_get_text(row_data.get("故障狀況"), "（未填狀況）")
-                status_box = force_get_text(row_data.get("目前狀態"), "（無狀態描述）")
-                memo_box = force_get_text(row_data.get("維修進度備註"), "無備註")
-                
-                engineer_assigned = str(row_data.get("承辦人", "未指派")).strip()
-                
-                # 先整理附件連結，再一次放入同一張卡片；使用無縮排的 HTML，避免被 Markdown 當成程式碼。
-                attachment_items = row_data.get("圖片連結清單", [])
-                seen = set()
-                attachment_links = []
-                for item in attachment_items if isinstance(attachment_items, list) else []:
-                    if not isinstance(item, (tuple, list)) or len(item) != 2:
-                        continue
-                    label, link_url = str(item[0]).strip(), str(item[1]).strip()
-                    key = (label, link_url)
-                    if key not in seen and is_safe_url(link_url):
-                        seen.add(key)
-                        attachment_links.append((label or "照片連結", link_url))
-
-                links_html = ""
-                if attachment_links:
-                    links_html = "<div style='margin-top:10px;padding-top:10px;border-top:1px dashed #CBD5E1;background-color:#F8F9FA;'><div style='font-size:13px;color:#475569;font-weight:bold;margin-bottom:6px;'>附件</div>"
-                    for label, link_url in attachment_links:
-                        safe_label = html.escape(label)
-                        safe_url = html.escape(link_url, quote=True)
-                        links_html += f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer' style='display:inline-block;margin:3px 8px 3px 0;padding:7px 10px;border:1px solid #90CAF9;border-radius:6px;background-color:#E3F2FD;color:#0D47A1;text-decoration:none;font-size:13px;font-weight:bold;'>點擊觀看 [{safe_label}]</a>"
-                    links_html += "</div>"
-
-                card_html = f"""
-<div style='border-left:8px solid {border_color};background-color:#F8F9FA;padding:15px;border-radius:5px;margin-bottom:15px;box-shadow:1px 1px 5px rgba(0,0,0,0.05);'><div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'><span style='font-size:13px;color:#666;'>📋 申請資料<br>{date_box}</span><span style='font-size:12px;color:#475569;text-align:right;'>🗓️ 實際完工日：{completion_box}<br>完工月份：{completion_month_box}</span><span style='background-color:{border_color};color:white;padding:3px 8px;border-radius:12px;font-size:12px;font-weight:bold;'>{html.escape(str(status_now))}</span></div><p style='margin:8px 0;font-size:16px;color:#111;'><b>🛠️ 設備名稱：</b><br><span style='color:#0D47A1;font-weight:bold;'>{device_box}</span></p><p style='margin:8px 0;font-size:15px;color:#333;'><b>🚨 故障狀況：</b><br>{trouble_box}</p><p style='margin:5px 0;font-size:14px;color:#2E7D32;'><b>👨‍🔧 負責工程師：</b><br><span style='background-color:#E8F5E9;padding:2px 6px;border-radius:4px;font-weight:bold;'>{html.escape(engineer_assigned)}</span></p><p style='margin:5px 0;font-size:14px;color:#444;'><b>💬 目前進度狀態：</b><br>{status_box}</p><p style='margin:5px 0;font-size:13px;color:#475569;background-color:#EEF6FF;padding:6px;border-radius:4px;border:1px solid #D7E8FA;'><b>📊 日期分析：</b>申請日 {application_box} ｜ 實際完工日 {completion_box}<br>完工月份：{completion_month_box} ｜ 維修天數：{duration_box} 天 ｜ 逾期天數：{delay_box} 天</p><p style='margin:5px 0;font-size:13px;color:#777;background-color:#FFF;padding:6px;border-radius:4px;border:1px dashed #DDD;'><b>📝 維修備註：</b><br>{memo_box}</p><p style='margin:5px 0;font-size:11px;color:#94A3B8;'>資料來源：{source_box}</p>{links_html}</div>
-"""
-                st.markdown(card_html, unsafe_allow_html=True)
-        else:
-            st.info("目前無符合篩選條件的報修案件。")
-            
+    # ---- 主管先看區 ----
+    st.subheader("一、先看需要處理的案件")
+    risk_df = filtered[filtered["風險"].isin(["已逾期", "待處理", "已駁回"])].copy()
+    if risk_df.empty:
+        st.success("目前篩選範圍內沒有逾期或待處理案件。")
     else:
-        st.warning("⚠️ 數據讀取成功，但清洗過後「無符合判定條件」的案件資料。請確認您的 Google 試算表中 A 欄是否包含標準日期格式 (例如 2026/08/12)。")
+        risk_view = risk_df[["報修單號", "設備名稱", "精確進度狀態", "風險", "承辦人", "申請日期", "預計完成日", "實際完工日期", "逾期天數"]].copy()
+        risk_view["逾期天數"] = risk_view["逾期天數"].map(fmt_number)
+        st.dataframe(risk_view, hide_index=True, use_container_width=True)
+
+    # ---- 趨勢與分布 ----
+    st.subheader("二、整體趨勢與分布")
+    c1, c2 = st.columns(2)
+    with c1:
+        status_counts = filtered["精確進度狀態"].value_counts().rename_axis("狀態").reset_index(name="件數")
+        fig = px.pie(status_counts, names="狀態", values="件數", hole=0.5, color="狀態", color_discrete_map=STATUS_COLORS)
+        fig.update_layout(title="案件狀態分布", margin=dict(t=55, l=10, r=10, b=10), legend_title="")
+        st.plotly_chart(fig, use_container_width=True)
+    with c2:
+        month_order = [f"{m:02d}月" for m in range(1, 13)]
+        application = filtered["申請月份"].value_counts().reindex(month_order, fill_value=0)
+        completed_month = filtered["實際完工月份"].value_counts().reindex(month_order, fill_value=0)
+        trend = pd.DataFrame({"月份": month_order, "申請件數": application.values, "完工件數": completed_month.values})
+        fig = go.Figure()
+        fig.add_bar(x=trend["月份"], y=trend["申請件數"], name="申請件數", marker_color="#93C5FD")
+        fig.add_bar(x=trend["月份"], y=trend["完工件數"], name="實際完工件數", marker_color="#16A34A")
+        fig.update_layout(title="申請與實際完工月份比較", barmode="group", height=380, margin=dict(t=55, l=10, r=10, b=10), legend_title="")
+        st.plotly_chart(fig, use_container_width=True)
+
+    c3, c4 = st.columns(2)
+    with c3:
+        assignee = filtered["承辦人"].value_counts().sort_values().reset_index()
+        assignee.columns = ["承辦人", "案件數"]
+        fig = px.bar(assignee, x="案件數", y="承辦人", orientation="h", text_auto=True, title="承辦案件量")
+        fig.update_layout(height=360, margin=dict(t=55, l=10, r=10, b=10), showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+    with c4:
+        days = filtered[filtered["維修天數_num"].notna()][["承辦人", "維修天數_num"]].copy()
+        if days.empty:
+            st.info("目前沒有足夠的完工日期可計算維修天數。")
+        else:
+            days = days.groupby("承辦人", as_index=False)["維修天數_num"].median().sort_values("維修天數_num")
+            days.columns = ["承辦人", "中位維修天數"]
+            fig = px.bar(days, x="中位維修天數", y="承辦人", orientation="h", text_auto=True, title="各承辦人中位維修天數")
+            fig.update_layout(height=360, margin=dict(t=55, l=10, r=10, b=10), showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+    # ---- 明細 ----
+    st.subheader("三、案件明細")
+    if filtered.empty:
+        st.info("目前篩選條件沒有案件。")
+    else:
+        st.caption("案件預設收合；點開案件即可查看完整備註與報修圖／完工圖。")
+        for _, row in filtered.sort_values(["風險", "申請日期_dt"], ascending=[True, False]).iterrows():
+            render_case_card(row)
+
+    with st.expander("資料品質與欄位說明"):
+        st.write(f"目前資料共 {len(df)} 筆，其中對方網站同步 {int((df['資料來源'] == '對方網站同步').sum())} 筆，本地永久歷史 {int((df['資料來源'] == '本地永久歷史').sum())} 筆。")
+        st.write("月份篩選預設使用實際完工月份；未完工案件會歸入「未完工」。完工狀態依是否存在實際完工日期判定，維修天數為實際完工日減申請日，逾期天數為實際完工日減預計完成日。")

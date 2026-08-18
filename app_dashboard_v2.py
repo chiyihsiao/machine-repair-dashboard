@@ -63,7 +63,6 @@ def check_password() -> bool:
     return False
 
 
-@st.cache_data(ttl=300, show_spinner=False)
 def load_dashboard_data() -> pd.DataFrame:
     source_url = secret_value(
         "source_web_app_url",
@@ -186,10 +185,9 @@ if check_password():
 
     with st.sidebar:
         st.header("控制面板")
-        if st.button("🔄 立即同步對方資料", use_container_width=True):
-            load_dashboard_data.clear()
+        if st.button("🔄 重新抓取對方資料", use_container_width=True):
             st.rerun()
-        st.caption("自動同步快取：5分鐘。首次同步需啟動瀏覽器，約10～60秒。")
+        st.caption("每次載入都直接抓取對方網頁最新資料；首次或重新整理可能需要10～60秒。")
 
     try:
         with st.spinner("正在同步資料並整理儀表板，請稍候..."):

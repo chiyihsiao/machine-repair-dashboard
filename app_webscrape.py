@@ -62,7 +62,6 @@ if check_password():
     # ================== 2. 核心功能：自動讀取對方 Apps Script 網頁 ==================
     from merge_records import merge_live_and_local
 
-    @st.cache_data(ttl=60, show_spinner=False)
     def load_and_stitch_perfect_rows_cloud_final():
         try:
             source_url = st.secrets.get("source_web_app_url", "").strip()
@@ -131,35 +130,28 @@ if check_password():
         k4.markdown(f"<div style='background-color:#FFF3E0; padding:15px; border-radius:10px; text-align:center;'><h4 style='color:#E65100;margin:0;'>📈 實際完工回報率</h4><h2 style='color:#E65100;margin:5px 0;'>{rate:.1f} %</h2><small style='color:#9A3412;'>核准完成 {accepted_cases} 件</small></div>", unsafe_allow_html=True)
 
         st.markdown("---")
-        st.markdown("### 🔍 篩選條件")
-        with st.expander("開啟／收合篩選條件", expanded=True):
-            f1, f2, f3 = st.columns(3)
-            with f1:
-                date_basis = st.selectbox("📅 月份分析依據", ["實際完工月份", "申請月份"])
-                month_column = date_basis
-                month_values = sorted(df[month_column].dropna().astype(str).unique().tolist())
-                selected_months = st.multiselect("月份（可複選）", month_values, default=month_values)
-            with f2:
-                completed_filter = st.selectbox("✅ 完工狀態", ["全部完工狀態", "尚未完工", "已完工"])
-                user_values = sorted(df["報修人"].dropna().astype(str).unique().tolist())
-                selected_users = st.multiselect("👤 報修人（可複選）", user_values, default=user_values)
-            with f3:
-                assignee_values = sorted(df["承辦人"].dropna().astype(str).unique().tolist())
-                selected_assignees = st.multiselect("👨‍🔧 承辦人（可複選）", assignee_values, default=assignee_values)
-                known_statuses = ["已完成", "維修中", "待主管審核", "設備課待處理", "主管已駁回"]
-                extra_statuses = [x for x in df["精確進度狀態"].dropna().astype(str).unique().tolist() if x not in known_statuses]
-                status_values = known_statuses + sorted(extra_statuses)
-                selected_statuses = st.multiselect("🚦 目前流程狀態（可複選）", status_values, default=status_values)
+        st.markdown("### 🔍 智慧人員與時間進度篩選系統")
+        f1, f2, f3, f4, f5 = st.columns(5)
+        with f1:
+            date_basis = st.selectbox("📅 月份分析依據：", ["實際完工月份", "申請月份"])
+            month_column = date_basis
+            available_months = ["全部月份"] + sorted(df[month_column].dropna().astype(str).unique().tolist())
+            selected_month = st.selectbox(f"按【{date_basis}】查詢：", available_months)
+        with f2:
+            selected_user = st.selectbox("👤 按【報修人員姓名】快速篩選：", ["全部報修人"] + sorted(df["報修人"].dropna().astype(str).unique().tolist()))
+        with f3:
+            selected_assignee = st.selectbox("👨‍🔧 按【承辦維修人員】快速篩選：", ["全部承辦人"] + sorted(df["承辦人"].dropna().astype(str).unique().tolist()))
+        with f4:
+            known_statuses = ["全部狀態", "已完成", "維修中", "待主管審核", "設備課待處理", "主管已駁回"]
+            selected_status = st.selectbox("🚦 按【目前進度狀態】精確篩選：", known_statuses)
+        with f5:
+            completed_filter = st.selectbox("✅ 完工狀態：", ["全部完工狀態", "尚未完工", "已完工"])
 
         filtered_df = df.copy()
-        if selected_months: filtered_df = filtered_df[filtered_df[month_column].astype(str).isin(selected_months)]
-        else: filtered_df = filtered_df.iloc[0:0]
-        if selected_users: filtered_df = filtered_df[filtered_df["報修人"].astype(str).isin(selected_users)]
-        else: filtered_df = filtered_df.iloc[0:0]
-        if selected_assignees: filtered_df = filtered_df[filtered_df["承辦人"].astype(str).isin(selected_assignees)]
-        else: filtered_df = filtered_df.iloc[0:0]
-        if selected_statuses: filtered_df = filtered_df[filtered_df["精確進度狀態"].astype(str).isin(selected_statuses)]
-        else: filtered_df = filtered_df.iloc[0:0]
+        if selected_month != "全部月份": filtered_df = filtered_df[filtered_df[month_column].astype(str) == selected_month]
+        if selected_user != "全部報修人": filtered_df = filtered_df[filtered_df["報修人"] == selected_user]
+        if selected_assignee != "全部承辦人": filtered_df = filtered_df[filtered_df["承辦人"] == selected_assignee]
+        if selected_status != "全部狀態": filtered_df = filtered_df[filtered_df["精確進度狀態"] == selected_status]
         if completed_filter != "全部完工狀態": filtered_df = filtered_df[filtered_df["完工狀態"] == completed_filter]
 
         st.markdown(f"💡 目前依據選單過濾出：<b style='color:#1E88E5; font-size:18px;'>{len(filtered_df)}</b> 筆符合條件的工廠報修紀錄。", unsafe_allow_html=True)

@@ -140,29 +140,29 @@ def fmt_number(value) -> str:
 
 
 def render_case_card(row: pd.Series) -> None:
+    """以單欄垂直卡片呈現案件，手機上可直接由上往下閱讀。"""
     status = str(row.get("精確進度狀態", "未判定"))
+    completion_status = str(row.get("完工狀態", "尚未完工"))
     risk = str(row.get("風險", "正常"))
     case_id = str(row.get("報修單號", "未編號"))
     device = str(row.get("設備名稱", "未填設備"))
-    title = f"{case_id}｜{device}｜{status}"
-    with st.expander(title, expanded=False):
-        top1, top2, top3, top4 = st.columns(4)
-        top1.metric("申請日期", str(row.get("申請日期", "未填")))
-        top2.metric("實際完工日", str(row.get("實際完工日期", "尚未完工")))
-        top3.metric("維修天數", f"{fmt_number(row.get('維修天數'))} 天")
-        top4.metric("逾期天數", f"{fmt_number(row.get('逾期天數'))} 天")
-        st.caption(f"流程狀態：{status}　｜　完工狀態：{row.get('完工狀態', '尚未完工')}　｜　風險：{risk}　｜　資料來源：{row.get('資料來源', '對方網站同步')}")
-        left, right = st.columns([1, 1])
-        with left:
-            st.markdown(f"**設備名稱**：{html.escape(device)}")
-            st.markdown(f"**報修人**：{html.escape(str(row.get('報修人', '未提供')))}")
-            st.markdown(f"**承辦人**：{html.escape(str(row.get('承辦人', '未指派')))}")
-            st.markdown(f"**預計完成日**：{html.escape(str(row.get('預計完成日', '未填')))}")
-        with right:
-            st.markdown(f"**故障狀況**：{html.escape(str(row.get('故障狀況', '未填')))}")
-            st.markdown(f"**目前狀態**：{html.escape(str(row.get('目前狀態', '未填')))}")
-        with st.expander("查看維修備註", expanded=False):
-            st.text(str(row.get("維修進度備註", "無備註")))
+
+    with st.container(border=True):
+        st.subheader(f"{case_id}｜{device}")
+        st.caption(
+            f"流程狀態：{status}　｜　完工狀態：{completion_status}　｜　"
+            f"風險：{risk}　｜　資料來源：{row.get('資料來源', '對方網站同步')}"
+        )
+        st.write(f"**申請日期：** {row.get('申請日期', '未填')}")
+        st.write(f"**實際完工日：** {row.get('實際完工日期', '尚未完工')}")
+        st.write(f"**預計完成日：** {row.get('預計完成日', '未填')}")
+        st.write(f"**維修天數：** {fmt_number(row.get('維修天數'))} 天　｜　**逾期天數：** {fmt_number(row.get('逾期天數'))} 天")
+        st.write(f"**報修人：** {row.get('報修人', '未提供')}　｜　**承辦人：** {row.get('承辦人', '未指派')}")
+        st.write(f"**故障狀況：** {row.get('故障狀況', '未填')}")
+        st.write(f"**目前狀態：** {row.get('目前狀態', '未填')}")
+        st.markdown("**維修備註**")
+        st.text(str(row.get("維修進度備註", "無備註")))
+
         links = row.get("圖片連結清單", [])
         valid_links = []
         if isinstance(links, list):
@@ -173,7 +173,7 @@ def render_case_card(row: pd.Series) -> None:
                         valid_links.append((label, url))
         if valid_links:
             st.markdown("**附件**")
-            link_cols = st.columns(min(3, len(valid_links)))
+            link_cols = st.columns(min(2, len(valid_links)))
             for index, (label, url) in enumerate(valid_links):
                 with link_cols[index % len(link_cols)]:
                     st.link_button(f"查看{label}", url, use_container_width=True)

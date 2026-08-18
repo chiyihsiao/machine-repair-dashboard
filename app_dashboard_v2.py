@@ -131,7 +131,7 @@ if check_password():
 
         st.markdown("---")
         st.markdown("### 🔍 智慧人員與時間進度篩選系統")
-        f1, f2, f3, f4, f5 = st.columns(5)
+        f1, f2, f3, f4 = st.columns(4)
         with f1:
             date_basis = st.selectbox("📅 月份分析依據：", ["實際完工月份", "申請月份"])
             month_column = date_basis
@@ -142,17 +142,17 @@ if check_password():
         with f3:
             selected_assignee = st.selectbox("👨‍🔧 按【承辦維修人員】快速篩選：", ["全部承辦人"] + sorted(df["承辦人"].dropna().astype(str).unique().tolist()))
         with f4:
-            known_statuses = ["全部狀態", "已完成", "維修中", "待主管審核", "設備課待處理", "主管已駁回"]
+            known_statuses = ["全部狀態", "尚未完工", "已完成", "維修中", "待主管審核", "設備課待處理", "主管已駁回"]
             selected_status = st.selectbox("🚦 按【目前進度狀態】精確篩選：", known_statuses)
-        with f5:
-            completed_filter = st.selectbox("✅ 完工狀態：", ["全部完工狀態", "尚未完工", "已完工"])
 
         filtered_df = df.copy()
         if selected_month != "全部月份": filtered_df = filtered_df[filtered_df[month_column].astype(str) == selected_month]
         if selected_user != "全部報修人": filtered_df = filtered_df[filtered_df["報修人"] == selected_user]
         if selected_assignee != "全部承辦人": filtered_df = filtered_df[filtered_df["承辦人"] == selected_assignee]
-        if selected_status != "全部狀態": filtered_df = filtered_df[filtered_df["精確進度狀態"] == selected_status]
-        if completed_filter != "全部完工狀態": filtered_df = filtered_df[filtered_df["完工狀態"] == completed_filter]
+        if selected_status == "尚未完工":
+            filtered_df = filtered_df[filtered_df["完工狀態"] == "尚未完工"]
+        elif selected_status != "全部狀態":
+            filtered_df = filtered_df[filtered_df["精確進度狀態"] == selected_status]
 
         st.markdown(f"💡 目前依據選單過濾出：<b style='color:#1E88E5; font-size:18px;'>{len(filtered_df)}</b> 筆符合條件的工廠報修紀錄。", unsafe_allow_html=True)
         st.markdown("---")
@@ -180,7 +180,7 @@ if check_password():
                 st.info("無數據可顯示長條圖")
 
         st.markdown("---")
-        st.markdown("### 📱 歷史報修詳細清單（手機響應式垂直卡片＋雲端照片直顯優化版）")
+        st.markdown("### 📋 歷史報修詳細清單")
         
         if not filtered_df.empty:
             for idx, row_data in filtered_df.iterrows():

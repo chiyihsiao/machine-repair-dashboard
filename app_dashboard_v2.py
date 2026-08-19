@@ -193,6 +193,16 @@ if check_password():
             bar_data = filtered_df.groupby(["承辦人", "精確進度狀態"]).size().reset_index(name="件數")
             engineer_count = max(1, bar_data["承辦人"].nunique())
             bar_height = max(440, min(760, 360 + engineer_count * 45))
+            max_total = int(bar_data.groupby("承辦人")["件數"].sum().max())
+            if max_total <= 5:
+                y_tick_step = 1
+            elif max_total <= 20:
+                y_tick_step = 5
+            elif max_total <= 50:
+                y_tick_step = 10
+            else:
+                y_tick_step = max(10, (max_total + 4) // 5)
+            y_axis_max = max_total + max(1, int(y_tick_step * 0.15))
             fig_bar = px.bar(
                 bar_data,
                 x="承辦人",
@@ -227,7 +237,12 @@ if check_password():
                 yaxis=dict(
                     tickfont=dict(size=14),
                     title_font=dict(size=16),
-                    dtick=1,
+                    dtick=y_tick_step,
+                    range=[0, y_axis_max],
+                    showgrid=True,
+                    gridcolor="#CBD5E1",
+                    zeroline=True,
+                    zerolinewidth=2,
                     automargin=True,
                 ),
                 legend=dict(font=dict(size=13), title_font=dict(size=14)),

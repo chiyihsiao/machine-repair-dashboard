@@ -154,6 +154,15 @@ if check_password():
         elif selected_status != "全部狀態":
             filtered_df = filtered_df[filtered_df["精確進度狀態"] == selected_status]
 
+        # 每次篩選後都依「申請日期」由新到舊排序，沒有日期的資料固定放在最後。
+        filtered_df = filtered_df.copy()
+        filtered_df["_申請日期排序"] = pd.to_datetime(filtered_df["申請日期"], errors="coerce")
+        filtered_df = (
+            filtered_df
+            .sort_values("_申請日期排序", ascending=False, na_position="last", kind="stable")
+            .drop(columns=["_申請日期排序"])
+        )
+
         st.markdown(f"💡 目前依據選單過濾出：<b style='color:#1E88E5; font-size:18px;'>{len(filtered_df)}</b> 筆符合條件的工廠報修紀錄。", unsafe_allow_html=True)
         st.markdown("---")
 
@@ -170,11 +179,41 @@ if check_password():
                 st.info("無數據可顯示圓餅圖")
 
         with col2:
-            st.write("**👨‍🔧 各工程師承辦案件狀態比例 (強制垂直堆疊長條圖)**")
+            st.write("**👨‍🔧 各工程師承辦案件狀態比例（橫向堆疊長條圖）**")
             if not filtered_df.empty:
                 bar_data = filtered_df.groupby(["承辦人", "精確進度狀態"]).size().reset_index(name="件數")
-                fig_bar = px.bar(bar_data, x="承辦人", y="件數", color="精確進度狀態", barmode="stack", text_auto=True, height=320, template="plotly_white", color_discrete_map=color_map)
-                fig_bar.update_layout(xaxis_title="工程師姓名", yaxis_title="總案件數量 (件)", legend_title="案件狀態", bargap=0.45, xaxis={'type': 'category', 'categoryorder': 'total descending'})
+                engineer_count = max(1, bar_data["承辦人"].nunique())
+                bar_height = max(420, min(900, engineer_count * 72))
+                fig_bar = px.bar(
+                    bar_data,
+                    y="承辦人",
+                    x="件數",
+                    color="精確進度狀態",
+                    orientation="h",
+                    barmode="stack",
+                    text_auto=True,
+                    height=bar_height,
+                    template="plotly_white",
+                    color_discrete_map=color_map,
+                )
+                fig_bar.update_traces(textposition="inside", textfont_size=13, insidetextanchor="middle")
+                fig_bar.update_layout(
+                    xaxis_title="總案件數量（件）",
+                    yaxis_title="工程師姓名",
+                    legend_title="案件狀態",
+                    bargap=0.28,
+                    font=dict(size=14),
+                    margin=dict(l=150, r=35, t=25, b=65),
+                    xaxis=dict(tickfont=dict(size=14), title_font=dict(size=16), dtick=1),
+                    yaxis=dict(
+                        type="category",
+                        categoryorder="total ascending",
+                        tickfont=dict(size=14),
+                        title_font=dict(size=16),
+                        automargin=True,
+                    ),
+                    legend=dict(font=dict(size=13), title_font=dict(size=14)),
+                )
                 st.plotly_chart(fig_bar, use_container_width=True)
             else:
                 st.info("無數據可顯示長條圖")

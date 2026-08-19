@@ -79,7 +79,9 @@ def load_requests_from_web(url: str = SOURCE_URL, headless: bool = True, timeout
                 request_id = _extract_request_id(texts[0])
                 source = source_by_id.get(request_id, {})
 
-                application_date = _date_only(source.get("submitDate")) or _first_full_date(texts[0])
+                submit_date_raw = str(source.get("submitDate") or "").strip()
+                application_date = _date_only(submit_date_raw) or _first_full_date(texts[0])
+                application_datetime = _date_time_label(submit_date_raw)
                 applicant = str(source.get("applicant") or _extract_applicant(texts[0])).strip()
                 target_date = _date_only(source.get("targetDate"))
                 estimated_date = _date_only(source.get("estimatedCompleteDate"))
@@ -114,6 +116,7 @@ def load_requests_from_web(url: str = SOURCE_URL, headless: bool = True, timeout
                     "報修單號": request_id,
                     "報修日期／單號": display_date,
                     "申請日期": application_date,
+                    "申請日期時間": application_datetime,
                     "申請月份": _month_label(application_date),
                     "希望完成日": target_date,
                     "預計完成日": estimated_date,
@@ -175,7 +178,16 @@ def _date_only(value: Any) -> str:
     return f"{match.group(1)}/{int(match.group(2)):02d}/{int(match.group(3)):02d}" if match else ""
 
 
-def _first_full_date(value: str) -> str:
+def _date_time_label(value: Any) -> str:
+    match = re.search(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?", str(value or ""))
+    if not match:
+        return ""
+    hour = int(match.group(4) or 0)
+    minute = int(match.group(5) or 0)
+    return f"{match.group(1)}/{int(match.group(2)):02d}/{int(match.group(3)):02d} {hour:02d}:{minute:02d}"
+
+
+def _first_full_date(value: str):
     return _date_only(value)
 
 

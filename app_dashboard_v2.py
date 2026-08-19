@@ -168,90 +168,94 @@ if check_password():
 
         color_map = {"已完成": "#2ECC71", "維修中": "#3498DB", "待主管審核": "#F39C12", "設備課待處理": "#E74C3C", "主管已駁回": "#8E44AD"}
         
-        # 圓餅圖保留在上方；第二張長條圖改為下方全寬顯示，避免手機兩欄版面壓縮文字。
-        st.write("**🚨 篩選範圍內：全流程維修進度狀態比例（圓餅圖）**")
-        if not filtered_df.empty:
-            pie_data = filtered_df["精確進度狀態"].value_counts().reset_index()
-            pie_data.columns = ["狀態", "件數"]
-            st.plotly_chart(
-                px.pie(
-                    pie_data,
-                    values="件數",
-                    names="狀態",
-                    hole=0.4,
-                    height=320,
-                    color="狀態",
-                    color_discrete_map=color_map,
-                ),
-                use_container_width=True,
-            )
-        else:
-            st.info("無數據可顯示圓餅圖")
+        # 兩張圖維持同一列左右並排；長條圖保留直向堆疊與精簡 Y 軸主要刻度。
+        chart_col1, chart_col2 = st.columns(2)
 
-        st.write("**👨‍🔧 各工程師承辦案件狀態比例（直向堆疊長條圖）**")
-        if not filtered_df.empty:
-            bar_data = filtered_df.groupby(["承辦人", "精確進度狀態"]).size().reset_index(name="件數")
-            engineer_count = max(1, bar_data["承辦人"].nunique())
-            bar_height = max(440, min(760, 360 + engineer_count * 45))
-            max_total = int(bar_data.groupby("承辦人")["件數"].sum().max())
-            if max_total <= 5:
-                y_tick_step = 1
-            elif max_total <= 20:
-                y_tick_step = 5
-            elif max_total <= 50:
-                y_tick_step = 10
+        with chart_col1:
+            st.write("**🚨 篩選範圍內：全流程維修進度狀態比例（圓餅圖）**")
+            if not filtered_df.empty:
+                pie_data = filtered_df["精確進度狀態"].value_counts().reset_index()
+                pie_data.columns = ["狀態", "件數"]
+                st.plotly_chart(
+                    px.pie(
+                        pie_data,
+                        values="件數",
+                        names="狀態",
+                        hole=0.4,
+                        height=320,
+                        color="狀態",
+                        color_discrete_map=color_map,
+                    ),
+                    use_container_width=True,
+                )
             else:
-                y_tick_step = max(10, (max_total + 4) // 5)
-            y_axis_max = max_total + max(1, int(y_tick_step * 0.15))
-            fig_bar = px.bar(
-                bar_data,
-                x="承辦人",
-                y="件數",
-                color="精確進度狀態",
-                barmode="stack",
-                text_auto=True,
-                height=bar_height,
-                template="plotly_white",
-                color_discrete_map=color_map,
-            )
-            fig_bar.update_traces(
-                textposition="auto",
-                textfont_size=13,
-                cliponaxis=False,
-            )
-            fig_bar.update_layout(
-                xaxis_title="工程師姓名",
-                yaxis_title="總案件數量（件）",
-                legend_title="案件狀態",
-                bargap=0.35,
-                font=dict(size=14),
-                margin=dict(l=65, r=35, t=25, b=95),
-                xaxis=dict(
-                    type="category",
-                    categoryorder="total descending",
-                    tickangle=-25,
-                    tickfont=dict(size=15),
-                    title_font=dict(size=16),
-                    automargin=True,
-                ),
-                yaxis=dict(
-                    tickfont=dict(size=14),
-                    title_font=dict(size=16),
-                    dtick=y_tick_step,
-                    range=[0, y_axis_max],
-                    showgrid=True,
-                    gridcolor="#CBD5E1",
-                    zeroline=True,
-                    zerolinewidth=2,
-                    automargin=True,
-                ),
-                legend=dict(font=dict(size=13), title_font=dict(size=14)),
-                uniformtext_minsize=11,
-                uniformtext_mode="hide",
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
-        else:
-            st.info("無數據可顯示長條圖")
+                st.info("無數據可顯示圓餅圖")
+
+        with chart_col2:
+            st.write("**👨‍🔧 各工程師承辦案件狀態比例（直向堆疊長條圖）**")
+            if not filtered_df.empty:
+                bar_data = filtered_df.groupby(["承辦人", "精確進度狀態"]).size().reset_index(name="件數")
+                engineer_count = max(1, bar_data["承辦人"].nunique())
+                bar_height = max(360, min(520, 300 + engineer_count * 45))
+                max_total = int(bar_data.groupby("承辦人")["件數"].sum().max())
+                if max_total <= 5:
+                    y_tick_step = 1
+                elif max_total <= 20:
+                    y_tick_step = 5
+                elif max_total <= 50:
+                    y_tick_step = 10
+                else:
+                    y_tick_step = max(10, (max_total + 4) // 5)
+                y_axis_max = max_total + max(1, int(y_tick_step * 0.15))
+                fig_bar = px.bar(
+                    bar_data,
+                    x="承辦人",
+                    y="件數",
+                    color="精確進度狀態",
+                    barmode="stack",
+                    text_auto=True,
+                    height=bar_height,
+                    template="plotly_white",
+                    color_discrete_map=color_map,
+                )
+                fig_bar.update_traces(
+                    textposition="auto",
+                    textfont_size=13,
+                    cliponaxis=False,
+                )
+                fig_bar.update_layout(
+                    xaxis_title="工程師姓名",
+                    yaxis_title="總案件數量（件）",
+                    legend_title="案件狀態",
+                    bargap=0.35,
+                    font=dict(size=14),
+                    margin=dict(l=65, r=35, t=25, b=95),
+                    xaxis=dict(
+                        type="category",
+                        categoryorder="total descending",
+                        tickangle=-25,
+                        tickfont=dict(size=15),
+                        title_font=dict(size=16),
+                        automargin=True,
+                    ),
+                    yaxis=dict(
+                        tickfont=dict(size=14),
+                        title_font=dict(size=16),
+                        dtick=y_tick_step,
+                        range=[0, y_axis_max],
+                        showgrid=True,
+                        gridcolor="#CBD5E1",
+                        zeroline=True,
+                        zerolinewidth=2,
+                        automargin=True,
+                    ),
+                    legend=dict(font=dict(size=13), title_font=dict(size=14)),
+                    uniformtext_minsize=11,
+                    uniformtext_mode="hide",
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
+            else:
+                st.info("無數據可顯示長條圖")
 
         st.markdown("---")
         st.markdown("### 📋 歷史報修詳細清單")

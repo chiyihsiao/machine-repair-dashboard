@@ -85,7 +85,14 @@ def load_requests_from_web(url: str = SOURCE_URL, headless: bool = True, timeout
                 estimated_date = _date_only(source.get("estimatedCompleteDate"))
                 completion_time = _date_only(source.get("completionTime"))
                 completion_note = str(source.get("completionNote") or texts[5] or "").strip()
-                actual_completion = completion_time or _extract_report_date(completion_note, application_date)
+                initial_assessment = str(source.get("initialAssessment") or "").strip()
+                note_parts = []
+                if initial_assessment:
+                    note_parts.append(initial_assessment if initial_assessment.startswith("判定") else f"判定：{initial_assessment}")
+                if completion_note:
+                    note_parts.append(completion_note)
+                combined_note = "\n".join(note_parts)
+                actual_completion = completion_time or _extract_report_date(combined_note, application_date)
                 status_raw = str(source.get("status") or texts[4] or "").strip()
                 worker = str(source.get("worker") or _extract_worker(texts[4])).strip()
 
@@ -121,7 +128,7 @@ def load_requests_from_web(url: str = SOURCE_URL, headless: bool = True, timeout
                     "圖片連結清單": links,
                     "目前狀態": display_status,
                     "原始狀態": status_raw,
-                    "維修進度備註": completion_note,
+                    "維修進度備註": combined_note,
                     "報修人": applicant or "工廠員工",
                     "承辦人": worker or "未指派/待審核",
                     "精確進度狀態": _normalize_status(status_raw),

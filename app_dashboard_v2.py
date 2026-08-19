@@ -1,5 +1,6 @@
 import html
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -194,7 +195,22 @@ if check_password():
         with chart_col2:
             st.write("**👨‍🔧 各工程師承辦案件狀態比例（直向堆疊長條圖）**")
             if not filtered_df.empty:
-                bar_data = filtered_df.groupby(["承辦人", "精確進度狀態"]).size().reset_index(name="件數")
+                # 所有狀態都以同一個「承辦人」分組；若來源欄位被狀態文字覆蓋，從目前狀態的「承辦：姓名」補回。
+                chart_rows = filtered_df.copy()
+                status_only_values = {"", "nan", "主管已駁回", "已完成", "維修中", "待主管審核", "設備課待處理"}
+
+                def chart_assignee(row):
+                    assignee = str(row.get("承辦人", "")).strip()
+                    if assignee not in status_only_values and assignee != "未指派/待審核":
+                        return assignee
+                    current_text = str(row.get("目前狀態", ""))
+                    match = re.search(r"承辦[:：]\s*([^\n]+)", current_text)
+                    if match and match.group(1).strip():
+                        return match.group(1).strip()
+                    return assignee or "未指派/待審核"
+
+                chart_rows["承辦人"] = chart_rows.apply(chart_assignee, axis=1)
+                bar_data = chart_rows.groupby(["承辦人", "精確進度狀態"], dropna=False).size().reset_index(name="件數")
                 engineer_count = max(1, bar_data["承辦人"].nunique())
                 bar_height = max(360, min(520, 300 + engineer_count * 45))
                 max_total = int(bar_data.groupby("承辦人")["件數"].sum().max())

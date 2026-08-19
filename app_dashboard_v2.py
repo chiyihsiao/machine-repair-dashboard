@@ -155,9 +155,12 @@ if check_password():
         elif selected_status != "全部狀態":
             filtered_df = filtered_df[filtered_df["精確進度狀態"] == selected_status]
 
-        # 每次篩選後都依「申請日期」由新到舊排序，沒有日期的資料固定放在最後。
+        # 每次篩選後依「申請日期時間」由新到舊排序；沒有時間時回退到申請日期。
+        # 報修單號始終保留為每筆案件的唯一識別，不以日期、報修人或設備名稱合併。
         filtered_df = filtered_df.copy()
-        filtered_df["_申請日期排序"] = pd.to_datetime(filtered_df["申請日期"], errors="coerce")
+        date_time_sort = pd.to_datetime(filtered_df.get("申請日期時間", ""), errors="coerce")
+        date_only_sort = pd.to_datetime(filtered_df["申請日期"], errors="coerce")
+        filtered_df["_申請日期排序"] = date_time_sort.fillna(date_only_sort)
         filtered_df = (
             filtered_df
             .sort_values("_申請日期排序", ascending=False, na_position="last", kind="stable")

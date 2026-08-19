@@ -287,17 +287,29 @@ if check_password():
                     # 試算表內容一律 escape，避免文字被誤當成 HTML。
                     return html.escape(str(val)).replace("\n", "<br>")
 
-                date_box = force_get_text(row_data.get("報修日期／單號"), "（未填日期）")
+                request_id_box = force_get_text(row_data.get("報修單號"), "未編號")
                 application_box = force_get_text(row_data.get("申請日期"), "未填")
+                applicant_box = force_get_text(row_data.get("報修人"), "未提供")
+                target_date_box = force_get_text(row_data.get("希望完成日"), "未填")
+                expected_date_box = force_get_text(row_data.get("預計完成日"), "未填")
                 completion_box = force_get_text(row_data.get("實際完工日期"), "尚未完工")
                 completion_month_box = force_get_text(row_data.get("實際完工月份"), "未完工")
+                completion_report_box = force_get_text(row_data.get("完工回報日期"), "未提供")
+                completion_source_box = force_get_text(row_data.get("完成日來源"), "未提供")
                 duration_box = force_get_text(row_data.get("維修天數"), "未計算")
                 delay_box = force_get_text(row_data.get("逾期天數"), "未計算")
                 source_box = force_get_text(row_data.get("資料來源"), "對方網站同步")
                 device_box = force_get_text(row_data.get("設備名稱"), "（未填設備）")
-                trouble_box = force_get_text(row_data.get("故障狀況"), "（未填狀況）")
-                status_box = force_get_text(row_data.get("目前狀態"), "（無狀態描述）")
-                memo_box = force_get_text(row_data.get("維修進度備註"), "無備註")
+                category_box = force_get_text(row_data.get("設備類別"), "未提供")
+                trouble_box = force_get_text(row_data.get("故障狀況"), "來源未提供")
+                status_box = force_get_text(row_data.get("目前狀態"), "來源未提供")
+                original_status_box = force_get_text(row_data.get("原始狀態"), "來源未提供")
+                process_raw = str(row_data.get("處理過程", "") or "").strip()
+                memo_raw = str(row_data.get("維修進度備註", "") or "").strip()
+                if process_raw and memo_raw.endswith(process_raw):
+                    memo_raw = memo_raw[: -len(process_raw)].rstrip(" \\n")
+                memo_box = force_get_text(memo_raw, "無另外備註")
+                process_box = force_get_text(process_raw, "來源未提供")
                 
                 engineer_assigned = str(row_data.get("承辦人", "未指派")).strip()
                 
@@ -324,7 +336,21 @@ if check_password():
                     links_html += "</div>"
 
                 card_html = f"""
-<div style='border-left:8px solid {border_color};background-color:#F8F9FA;padding:15px;border-radius:5px;margin-bottom:15px;box-shadow:1px 1px 5px rgba(0,0,0,0.05);'><div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'><span style='font-size:13px;color:#666;'>📋 申請資料<br>{date_box}</span><span style='font-size:12px;color:#475569;text-align:right;'>🗓️ 實際完工日：{completion_box}<br>完工月份：{completion_month_box}</span><span style='background-color:{border_color};color:white;padding:3px 8px;border-radius:12px;font-size:12px;font-weight:bold;'>{html.escape(str(status_now))}</span></div><p style='margin:8px 0;font-size:16px;color:#111;'><b>🛠️ 設備名稱：</b><br><span style='color:#0D47A1;font-weight:bold;'>{device_box}</span></p><p style='margin:8px 0;font-size:15px;color:#333;'><b>🚨 故障狀況：</b><br>{trouble_box}</p><p style='margin:5px 0;font-size:14px;color:#2E7D32;'><b>👨‍🔧 負責工程師：</b><br><span style='background-color:#E8F5E9;padding:2px 6px;border-radius:4px;font-weight:bold;'>{html.escape(engineer_assigned)}</span></p><p style='margin:5px 0;font-size:14px;color:#444;'><b>💬 目前進度狀態：</b><br>{status_box}</p><p style='margin:5px 0;font-size:13px;color:#475569;background-color:#EEF6FF;padding:6px;border-radius:4px;border:1px solid #D7E8FA;'><b>📊 日期分析：</b>申請日 {application_box} ｜ 實際完工日 {completion_box}<br>完工月份：{completion_month_box} ｜ 維修天數：{duration_box} 天 ｜ 逾期天數：{delay_box} 天</p><p style='margin:5px 0;font-size:13px;color:#777;background-color:#FFF;padding:6px;border-radius:4px;border:1px dashed #DDD;'><b>📝 維修備註：</b><br>{memo_box}</p><p style='margin:5px 0;font-size:11px;color:#94A3B8;'>資料來源：{source_box}</p>{links_html}</div>
+<div style='width:100%;box-sizing:border-box;border-left:8px solid {border_color};background-color:#F8F9FA;padding:15px;border-radius:5px;margin-bottom:15px;box-shadow:1px 1px 5px rgba(0,0,0,0.05);overflow-wrap:anywhere;'>
+  <div style='display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;margin-bottom:10px;'>
+    <div style='flex:1 1 250px;min-width:220px;font-size:13px;color:#475569;line-height:1.65;'><b>📋 申請資料</b><br>申請日：{application_box}<br>報修單號：{request_id_box}<br>報修人：{applicant_box}<br>希望完成日：{target_date_box}<br>預計完成日：{expected_date_box}</div>
+    <div style='flex:1 1 230px;min-width:210px;font-size:12px;color:#475569;text-align:left;line-height:1.75;'>🗓️ 實際完工日：{completion_box}<br>完工月份：{completion_month_box}<br>完工回報日期：{completion_report_box}<br>完成日來源：{completion_source_box}</div>
+    <div style='flex:0 0 auto;margin-left:auto;background-color:{border_color};color:white;padding:5px 10px;border-radius:12px;font-size:12px;font-weight:bold;'>{html.escape(str(status_now))}</div>
+  </div>
+  <p style='margin:8px 0;font-size:16px;color:#111;'><b>🛠️ 設備名稱：</b><br><span style='color:#0D47A1;font-weight:bold;'>{device_box}</span><br><span style='font-size:13px;color:#64748B;'>設備類別：{category_box}</span></p>
+  <p style='margin:8px 0;font-size:15px;color:#333;line-height:1.7;'><b>🚨 故障狀況：</b><br>{trouble_box}</p>
+  <p style='margin:5px 0;font-size:14px;color:#2E7D32;'><b>👨‍🔧 負責工程師：</b><br><span style='background-color:#E8F5E9;padding:2px 6px;border-radius:4px;font-weight:bold;'>{html.escape(engineer_assigned)}</span></p>
+  <p style='margin:5px 0;font-size:14px;color:#444;line-height:1.7;'><b>💬 目前進度狀態：</b><br>{status_box}<br><span style='font-size:12px;color:#64748B;'>原始狀態：{original_status_box}</span></p>
+  <p style='margin:5px 0;font-size:13px;color:#475569;background-color:#EEF6FF;padding:7px;border-radius:4px;border:1px solid #D7E8FA;line-height:1.7;'><b>📊 日期分析：</b><br>申請日：{application_box} ｜ 實際完工日：{completion_box}<br>完工月份：{completion_month_box} ｜ 維修天數：{duration_box} 天 ｜ 逾期天數：{delay_box} 天</p>
+  <p style='margin:5px 0;font-size:13px;color:#777;background-color:#FFF;padding:7px;border-radius:4px;border:1px dashed #DDD;line-height:1.7;'><b>📝 維修判定／備註：</b><br>{memo_box}</p>
+  <p style='margin:5px 0;font-size:13px;color:#475569;background-color:#F8FAFC;padding:7px;border-radius:4px;border:1px solid #E2E8F0;line-height:1.7;'><b>🔧 處理過程：</b><br>{process_box}</p>
+  <p style='margin:5px 0;font-size:11px;color:#94A3B8;'>資料來源：{source_box}</p>{links_html}
+</div>
 """
                 st.markdown(card_html, unsafe_allow_html=True)
         else:
